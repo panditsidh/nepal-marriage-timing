@@ -200,3 +200,304 @@ forvalues i = 1/20 {
 * Now create dummies
 gen next_youngest_sis = (next_y_sex == 2) if next_y_sex < .
 gen next_youngest_bro = (next_y_sex == 1) if next_y_sex < .
+
+
+
+
+// fig 1 from Vogl paper//
+
+*--- Keep original data intact
+preserve
+
+* Reshape sibling data long
+reshape long mm1_ mm3_ mm9_, i(caseid) j(sibnum)
+
+* Keep only daughters
+keep if mm1_ == 2   // 2 = female
+
+* Create daughter order within each household
+bysort caseid (sibnum): gen daughter_order = sum(mm1_ == 2)
+
+* Indicator: 1 = still lives with mother, 0 = not
+gen with_mother = (mm9_ == 1)
+
+* Collapse: fraction living with mother by age and daughter order
+collapse (mean) with_mother, by(mm3_ daughter_order)
+rename mm3_ age
+
+* Plot multiple lines automatically (one for each daughter order)
+twoway ///
+    (line with_mother age if daughter_order==1, lcolor(blue)) ///
+    (line with_mother age if daughter_order==2, lcolor(red)) ///
+    (line with_mother age if daughter_order==3, lcolor(green)) ///
+    (line with_mother age if daughter_order==4, lcolor(orange)) ///
+    , legend(order(1 "1st daughter" 2 "2nd daughter" 3 "3rd daughter" 4 "4th daughter")) ///
+    ytitle("Fraction living with mother") xtitle("Age of daughter") ///
+    title("When daughters leave the household (Nepal DHS 2016)")
+
+*--- Restore main dataset unchanged
+restore
+
+// merge household and individual rosters//
+********** to do with household***********
+
+* Step 1. Load the PR (household roster) file
+use "NPPR7HFL.DTA", clear
+
+* Keep only daughters
+keep if hv104 == 2   // hv104=sex (1=male, 2=female)
+
+* Create indicator: does she live with mother?
+gen with_mother = (hv112 != 0 & hv112 != .)
+
+* Save temporary dataset
+tempfile daughters
+save `daughters'
+///////////////////////////////
+* Load household recode
+use "NPHR7HFL.DTA", clear
+
+* Create household ID
+egen hhid = group(hv001 hv002)
+
+* Reshape wide → long
+reshape long hv104_ hv105_ hv112_ hv113_, i(hhid) j(line)
+
+* Rename variables
+rename hv104_ sex
+rename hv105_ age
+rename hv112_ mother_line
+rename hv113_ father_line
+
+* Keep females only
+keep if sex == 2
+
+* Keep daughters (have a reported mother in household)
+keep if mother_line < .
+
+*assign birth order 
+
+bysort hhid (age): gen birth_order = _n
+
+* coreising with mother
+
+gen coreside = !missing(mother_line)
+
+* restricting with exact two daughters 
+bysort hhid: gen ndaughters = _N
+keep if ndaughters == 2
+
+
+
+reg coreside i.age##i.birth_order, cluster(hhid)
+margins birth_order, at(age=(5(1)25))
+marginsplot
+******************************************************
+use "NPHR7HFL.DTA", clear   // household recode
+egen hhid = group(hv001 hv002)
+
+* Reshape household members into long format
+reshape long hv104_ hv105_ hv112_, i(hhid) j(line)
+rename hv104_ sex
+rename hv105_ age
+rename hv112_ mother_line
+
+* Keep only daughters (females with known age)
+keep if sex == 2 & age < .
+
+gen coreside = !missing(mother_line)   // 1 if mother's line number is present, 0 otherwise
+
+bysort hhid (age): gen birth_order = _n   // oldest daughter = 1, next = 2, etc.
+bysort hhid: gen ndaughters = _N
+
+keep if ndaughters == 2
+
+xi: reg coreside i.age##i.birth_order, cluster(hhid)
+margins birth_order, at(age=(10(2)30))
+marginsplot, xdimension(age) by(birth_order) ///
+    title("Probability of living with mother, by daughter's birth order")
+
+*************************************
+// fig 1//
+*************
+
+use "NPHR7HFL.DTA", clear
+
+* Create household ID
+egen hhid = group(hv001 hv002)
+
+* Reshape household roster into long format
+reshape long hv101_ hv104_ hv105_ hv112_, i(hhid) j(line)
+
+* Rename after reshape
+rename hv101_ relation     // relationship to head
+rename hv104_ sex          // sex (1=male 2=female)
+rename hv105_ age          // age in years
+rename hv112_ mother_line  // mother's line number
+
+* Drop empty rows
+drop if relation==. & sex==. & age==.
+
+* Keep only daughters
+keep if sex==2 & age!=.
+
+* Flag coresiding with mother
+gen coreside = !missing(mother_line)
+
+* Order daughters within household
+bysort hhid (age): gen birth_order = _n
+bysort hhid: gen ndaughters = _N
+
+* Example: restrict to families with exactly 2 daughters
+keep if ndaughters==2
+
+* Collapse to get fraction coresiding by age and birth order
+collapse (mean) coreside, by(age birth_order)
+
+* Plot curves by birth order
+twoway ///
+(line coreside age if birth_order==1, lcolor(navy) msymbol(circle)) ///
+(line coreside age if birth_order==2, lcolor(maroon) msymbol(square)), ///
+xlabel(10(2)24) ylabel(0(.25)1) ///
+legend(order(1 "1st daughter" 2 "2nd daughter")) ///
+title("Families with 2 Girls") ///
+ytitle("Fraction Living with Mother") xtitle("Age")
+
+
+use "NPPR7HFL.DTA", clear
+
+use "NPPR7HFL.DTA", clear
+
+* Loop over 01–20 (adjust 20 to max household roster size)
+forvalues j = 1/20 {
+    local jj : display %02.0f `j'   // makes 01, 02, 03 … with leading zero
+    gen daughter_`jj' = (hv101_`jj'==3 & hv104_`jj'==2)
+}
+
+* Sum across household members to count daughters
+egen num_daughters = rowtotal(daughter_*)
+
+
+//////// daughters leaving home not in birth order (using the birth order recode_) ////////////
+/////////////////////////////////////////////////////////////
+* 1) Open the child-level file (all births to interviewed women)
+use "NPBR7HFL.DTA", clear   // Nepal 2016 BR file
+
+* 2) Keep daughters who are alive (so probability is among living daughters)
+keep if b4==2 & b5==1      // b4: sex (2=female); b5: alive (1)
+
+* 3) Daughter's age at interview (years)
+gen age_daughter = floor((v008 - b3)/12)   // v008: interview date (CMC); b3: DOB (CMC)
+keep if inrange(age_daughter, 0, 30)       // sensible plotting range
+
+* 4) Lives with mother indicator
+gen with_mother = (b9==0)   // b9: 0=lives with respondent (mother), 1=lives elsewhere
+
+* 5) Survey design (recommended for DHS)
+gen wt = v005/1000000
+svyset v021 [pweight=wt], strata(v022)
+
+* 6) Smooth curve with confidence bands—no collapsing needed
+svy: logit with_mother c.age_daughter##c.age_daughter
+margins, at(age_daughter=(0(1)30))
+marginsplot, ///
+  ytitle("Pr(daughter lives with mother)") ///
+  xtitle("Daughter age (years)") ///
+  title("Nepal DHS 2016: Coresidence with mother by daughter's age") ///
+  recast(line)
+
+
+// when the family has two daughters// ***observation: 3642***
+
+* Keep daughters (alive)
+keep if b4==2 & b5==1
+
+* Daughter's age at interview
+gen age_daughter = floor((v008 - b3)/12)
+keep if inrange(age_daughter, 0, 30)
+
+* Lives with mother indicator
+gen with_mother = (b9==0)
+
+* Mother ID
+egen mother_id = group(v001 v002 v003)   // cluster, hh, line number of mother
+
+// restricting to 2 daughters//
+bysort mother_id: gen daughters_per_mother = _N
+keep if daughters_per_mother==2
+
+//identifying the birth order//
+
+bysort mother_id (b3): gen daughter_rank = _n
+label define daughter_rank 1 "Elder daughter" 2 "Younger daughter"
+label values daughter_rank daughter_rank
+
+//plot the line//
+	
+	twoway ///
+  (lowess with_mother age_daughter if daughter_rank==1, bwidth(0.8) lpattern(solid)) ///
+  (lowess with_mother age_daughter if daughter_rank==2, bwidth(0.8) lpattern(dash)), ///
+  legend(order(1 "Elder" 2 "Younger")) ///
+  xtitle("Daughter age (years)") ytitle("Pr(lives with mother)") ///
+  title("Smoothed coresidence by birth rank (2-daughter families)")
+
+// family with 3 daughters// ** observation - 2205**
+
+use "NPBR7HFL.DTA", clear   // Nepal DHS 2016 Birth Recode
+
+* Keep daughters who are alive
+keep if b4==2 & b5==1
+
+* Daughter's age at interview
+gen age_daughter = floor((v008 - b3)/12)
+keep if inrange(age_daughter, 0, 30)
+
+* Lives with mother
+gen with_mother = (b9==0)
+
+* Mother ID
+egen mother_id = group(v001 v002 v003)
+
+// restrict with 3 daughters//
+
+bysort mother_id: gen daughters_per_mother = _N
+keep if daughters_per_mother==3
+
+// identify the rand of the child//
+bysort mother_id (b3): gen daughter_rank = _n
+label define daughter_rank 1 "Eldest" 2 "Middle" 3 "Youngest"
+label values daughter_rank daughter_rank
+
+// plot the line//
+
+twoway ///
+  (lowess with_mother age_daughter if daughter_rank==1, bwidth(0.8) lpattern(solid) lcolor(red)) ///
+  (lowess with_mother age_daughter if daughter_rank==2, bwidth(0.8) lpattern(solid) lcolor(blue)) ///
+  (lowess with_mother age_daughter if daughter_rank==3, bwidth(0.8) lpattern(solid) lcolor(green)), ///
+  legend(order(1 "Eldest" 2 "Middle" 3 "Youngest")) ///
+  xtitle("Daughter age (years)") ytitle("Pr(lives with mother)") ///
+  title("Smoothed coresidence by birth rank (3-daughter families)")
+
+
+
+// family with 4 daughters// observation 1268
+
+* keep families with exactly 4 daughters
+bysort mother_id: gen daughters_per_mother = _N
+keep if daughters_per_mother==4
+
+* assign birth rank within mother
+bysort mother_id (b3): gen daughter_rank = _n
+label define daughter_rank 1 "Eldest" 2 "2nd" 3 "3rd" 4 "Youngest"
+label values daughter_rank daughter_rank
+
+twoway ///
+  (lowess with_mother age_daughter if daughter_rank==1, bwidth(0.8) lpattern(solid) lcolor(red)) ///
+  (lowess with_mother age_daughter if daughter_rank==2, bwidth(0.8) lpattern(solid) lcolor(blue)) ///
+  (lowess with_mother age_daughter if daughter_rank==3, bwidth(0.8) lpattern(solid) lcolor(green)) ///
+  (lowess with_mother age_daughter if daughter_rank==4, bwidth(0.8) lpattern(solid) lcolor(orange)), ///
+  legend(order(1 "Eldest" 2 "2nd" 3 "3rd" 4 "Youngest")) ///
+  xtitle("Daughter age (years)") ytitle("Pr(lives with mother)") ///
+  title("Smoothed coresidence by birth rank (4-daughter families)")
+
+
