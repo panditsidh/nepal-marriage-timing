@@ -1,9 +1,11 @@
 // Causal connection between early marriage and decision making power//
 
+* sidh's path
+use caseid mm1_* mmidx_* using "/Users/sidhpandit/Desktop/DHS/data/nepal/nepal 2016 ir/NPIR7HFL.DTA", clear
 
 * test change by sidh
 
-Step 1: Load IR file and save a copy of sibling roster
+// Step 1: Load IR file and save a copy of sibling roster
 use "NPIR7HFL.DTA", clear
 
 // creating younger sister//
@@ -12,9 +14,11 @@ save "sibling_temp.dta", replace
 
 * Step 2: Reshape only sibling roster
 reshape long mm1_ mmidx_, i(caseid) j(siborder)
+* now the data is at the level of sibling
 
 * Drop respondent herself (mmidx = 0)
 drop if mmidx_ == 0
+* mmidx is index to maternal mortality?
 
 * Keep only sisters
 keep if mm1_ == 2   // 2 = female
@@ -433,7 +437,8 @@ twoway ///
   title("Smoothed coresidence by birth rank (4-daughter families)")
 
   
-  
+ 
+ 
 ******* trying to do residual plot *********
 * 1. Regress age at marriage on younger sister + controls
 reg v511 next_youngest_sis v130 v106 s103
