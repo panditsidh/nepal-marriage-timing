@@ -538,6 +538,20 @@ twoway (scatter resid_decision_alone resid_age, mcolor(none)) ///
 	   
 	   
 	   
-	   
+// residual on residual plot on whether the decision is made by the person or not on education //
+* 1. Regress years of education on younger sister + controls
+reg v133 next_youngest_sis v130 s103
+predict resid_edu, resid
+
+* 2. Regress decision-making power on the same controls
+reg decision_yn v130 s103
+predict resid_decision_yn, resid
+
+*3.  Make a residual-on-residual plot
+twoway (scatter resid_decision_yn resid_edu, mcolor(none)) ///	   
+	   (lfit resid_decision_yn resid_edu, lcolor(red)), ///
+       ytitle("Residuals of Decision-making power_yn") ///
+       xtitle("Residuals of years of education") ///
+       title("Residual-on-Residual Fit (no scatter)")
 	   
 	  
